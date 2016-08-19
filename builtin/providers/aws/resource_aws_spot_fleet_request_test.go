@@ -3,7 +3,6 @@ package aws
 import (
 	"encoding/base64"
 	"fmt"
-	"regexp"
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -12,7 +11,7 @@ import (
 	"github.com/hashicorp/terraform/terraform"
 )
 
-func TestAccAWSSpotFleetRequest_basic(t *testing.T) {
+func TestAccAWSSpotFleetRequest_lowestPriceAzOrSubnetInRegion(t *testing.T) {
 	var sfr ec2.SpotFleetRequestConfig
 
 	resource.Test(t, resource.TestCase{
@@ -34,21 +33,7 @@ func TestAccAWSSpotFleetRequest_basic(t *testing.T) {
 	})
 }
 
-func TestAccAWSSpotFleetRequest_brokenLaunchSpecification(t *testing.T) {
-	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckAWSSpotFleetRequestDestroy,
-		Steps: []resource.TestStep{
-			resource.TestStep{
-				Config:      testAccAWSSpotFleetRequestConfigBroken,
-				ExpectError: regexp.MustCompile("LaunchSpecification must include a subnet_id or an availability_zone"),
-			},
-		},
-	})
-}
-
-func TestAccAWSSpotFleetRequest_launchConfiguration(t *testing.T) {
+func TestAccAWSSpotFleetRequest_lowestPriceAzInGivenList(t *testing.T) {
 	var sfr ec2.SpotFleetRequestConfig
 
 	resource.Test(t, resource.TestCase{
@@ -57,11 +42,11 @@ func TestAccAWSSpotFleetRequest_launchConfiguration(t *testing.T) {
 		CheckDestroy: testAccCheckAWSSpotFleetRequestDestroy,
 		Steps: []resource.TestStep{
 			resource.TestStep{
-				Config: testAccAWSSpotFleetRequestWithAdvancedLaunchSpecConfig,
+				Config: testAccAWSSpotFleetRequestConfigWithAzs,
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckAWSSpotFleetRequestExists(
 						"aws_spot_fleet_request.foo", &sfr),
-					testAccCheckAWSSpotFleetRequest_LaunchSpecAttributes(&sfr),
+					testAccCheckAWSSpotFleetRequestAttributes(&sfr),
 					resource.TestCheckResourceAttr(
 						"aws_spot_fleet_request.foo", "spot_request_state", "active"),
 				),
@@ -69,6 +54,28 @@ func TestAccAWSSpotFleetRequest_launchConfiguration(t *testing.T) {
 		},
 	})
 }
+
+//func TestAccAWSSpotFleetRequest_launchConfiguration(t *testing.T) {
+//	var sfr ec2.SpotFleetRequestConfig
+//
+//	resource.Test(t, resource.TestCase{
+//		PreCheck:     func() { testAccPreCheck(t) },
+//		Providers:    testAccProviders,
+//		CheckDestroy: testAccCheckAWSSpotFleetRequestDestroy,
+//		Steps: []resource.TestStep{
+//			resource.TestStep{
+//				Config: testAccAWSSpotFleetRequestWithAdvancedLaunchSpecConfig,
+//				Check: resource.ComposeTestCheckFunc(
+//					testAccCheckAWSSpotFleetRequestExists(
+//						"aws_spot_fleet_request.foo", &sfr),
+//					testAccCheckAWSSpotFleetRequest_LaunchSpecAttributes(&sfr),
+//					resource.TestCheckResourceAttr(
+//						"aws_spot_fleet_request.foo", "spot_request_state", "active"),
+//				),
+//			},
+//		},
+//	})
+//}
 
 func TestAccAWSSpotFleetRequest_CannotUseEmptyKeyName(t *testing.T) {
 	_, errors := validateSpotFleetRequestKeyName("", "key_name")
@@ -217,13 +224,12 @@ resource "aws_spot_fleet_request" "foo" {
         instance_type = "m1.small"
         ami = "ami-d06a90b0"
         key_name = "${aws_key_pair.debugging.key_name}"
-        availability_zone = "us-west-2a"
     }
     depends_on = ["aws_iam_policy_attachment.test-attach"]
 }
 `
 
-const testAccAWSSpotFleetRequestConfigBroken = `
+const testAccAWSSpotFleetRequestConfigWithAzs = `
 resource "aws_key_pair" "debugging" {
 	key_name = "tmp-key"
 	public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQD3F6tyPEFEzV0LX3X8BsXdMsQz1x2cEikKDEY0aIj41qgxMCP/iteneqXSIFZBp5vizPvaoIR3Um9xK7PGoW8giupGn+EPuxIA4cDM4vzOqOkiMPhz5XK0whEjkVzTo4+S0puvDZuwIsdiW9mxhJc7tgBNL0cYlWSYVkz4G/fslNfRPW5mYAM49f4fhtxPb5ok4Q2Lg9dPKVHO/Bgeu5woMc7RY0p1ej6D4CKFE6lymSDJpW0YHX/wqE9+cfEauh7xZcG0q9t2ta6F6fmX0agvpFyZo8aFbXeUBr7osSCJNgvavWbM/06niWrOvYX2xwWdhXmXSrbX8ZbabVohBK41 phodgson@thoughtworks.com"
@@ -263,6 +269,7 @@ resource "aws_spot_fleet_request" "foo" {
         instance_type = "m1.small"
         ami = "ami-d06a90b0"
         key_name = "${aws_key_pair.debugging.key_name}"
+	availability_zones = ["us-west-2a","us-west-2b"]
     }
     depends_on = ["aws_iam_policy_attachment.test-attach"]
 }

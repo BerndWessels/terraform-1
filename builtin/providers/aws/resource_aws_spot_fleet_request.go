@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -230,9 +231,18 @@ func resourceAwsSpotFleetRequest() *schema.Resource {
 							ForceNew: true,
 						},
 						"availability_zone": &schema.Schema{
-							Type:     schema.TypeString,
+							Type:       schema.TypeString,
+							Optional:   true,
+							Computed:   true,
+							Deprecated: "Please use attribute `availability_zones' instead. This attribute will be removed in a future release.",
+						},
+
+						"availability_zones": &schema.Schema{
+							Type:     schema.TypeSet,
 							Optional: true,
 							ForceNew: true,
+							Elem:     &schema.Schema{Type: schema.TypeString},
+							Set:      schema.HashString,
 						},
 					},
 				},
@@ -291,19 +301,21 @@ func resourceAwsSpotFleetRequest() *schema.Resource {
 func buildSpotFleetLaunchSpecification(d map[string]interface{}, meta interface{}) (*ec2.SpotFleetLaunchSpecification, error) {
 	conn := meta.(*AWSClient).ec2conn
 
-	_, hasSubnet := d["subnet_id"]
-	_, hasAZ := d["availability_zone"]
-	if !hasAZ && !hasSubnet {
-		return nil, fmt.Errorf("LaunchSpecification must include a subnet_id or an availability_zone")
-	}
-
 	opts := &ec2.SpotFleetLaunchSpecification{
 		ImageId:      aws.String(d["ami"].(string)),
 		InstanceType: aws.String(d["instance_type"].(string)),
 		SpotPrice:    aws.String(d["spot_price"].(string)),
-		Placement: &ec2.SpotPlacement{
-			AvailabilityZone: aws.String(d["availability_zone"].(string)),
-		},
+	}
+
+	if v, ok := d["availability_zones"]; ok {
+		availabilityZones := v.(*schema.Set).List()
+		azs := make([]string, 0, len(availabilityZones))
+		for _, az := range availabilityZones {
+			azs = append(azs, az.(string))
+		}
+		opts.Placement = &ec2.SpotPlacement{
+			AvailabilityZone: aws.String(strings.Join(azs, ",")),
+		}
 	}
 
 	if v, ok := d["ebs_optimized"]; ok {
@@ -325,6 +337,18 @@ func buildSpotFleetLaunchSpecification(d map[string]interface{}, meta interface{
 	if v, ok := d["user_data"]; ok {
 		opts.UserData = aws.String(
 			base64.StdEncoding.EncodeToString([]byte(v.(string))))
+	}
+
+	if v, ok := d["key_name"]; ok {
+		opts.KeyName = aws.String(v.(string))
+	}
+
+	if v, ok := d["weighted_capacity"]; ok && v != "" {
+		wc, err := strconv.ParseFloat(v.(string), 64)
+		if err != nil {
+			return nil, err
+		}
+		opts.WeightedCapacity = aws.Float64(wc)
 	}
 
 	// check for non-default Subnet, and cast it to a String
@@ -389,18 +413,6 @@ func buildSpotFleetLaunchSpecification(d map[string]interface{}, meta interface{
 				}
 			}
 		}
-	}
-
-	if v, ok := d["key_name"]; ok {
-		opts.KeyName = aws.String(v.(string))
-	}
-
-	if v, ok := d["weighted_capacity"]; ok && v != "" {
-		wc, err := strconv.ParseFloat(v.(string), 64)
-		if err != nil {
-			return nil, err
-		}
-		opts.WeightedCapacity = aws.Float64(wc)
 	}
 
 	blockDevices, err := readSpotFleetBlockDeviceMappingsFromConfig(d, conn)
@@ -766,6 +778,9 @@ func launchSpecToMap(
 
 	if l.Placement != nil {
 		m["availability_zone"] = aws.StringValue(l.Placement.AvailabilityZone)
+
+		azs := strings.Split(*l.Placement.AvailabilityZone, ",")
+		m["availability_zones"] = azs
 	}
 
 	if l.SubnetId != nil {
